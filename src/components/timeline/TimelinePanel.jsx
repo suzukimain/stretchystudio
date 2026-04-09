@@ -2,15 +2,16 @@ import React, { useRef, useCallback, useEffect, useState, useMemo } from 'react'
 import { useAnimationStore } from '@/store/animationStore';
 import { useProjectStore } from '@/store/projectStore';
 import { useEditorStore } from '@/store/editorStore';
-import { PROP_LABELS } from '@/renderer/animationEngine';
+// animationEngine utilities available if needed for track labels
 
 /* ──────────────────────────────────────────────────────────────────────────
    Constants
 ────────────────────────────────────────────────────────────────────────── */
 
-const LABEL_W = 140;   // px — fixed node-name column width
-const ROW_H   = 22;    // px — height of each track row
-const RULER_H = 20;    // px — height of the time ruler
+const LABEL_W   = 140;  // px — fixed node-name column width
+const ROW_H     = 22;   // px — height of each track row
+const RULER_H   = 20;   // px — height of the time ruler
+const TRACK_PAD = 16;   // px — padding inside track area so edge frames don't clip
 
 /* ──────────────────────────────────────────────────────────────────────────
    Small helpers
@@ -134,18 +135,11 @@ export function TimelinePanel() {
   }, [proj.animations, update, anim]);
 
   /* ── Timeline pixel helpers ─────────────────────────────────────────── */
-  // Map frame → x-pixel inside the track area (not including label column).
-  // We compute track area width from the ref.
-  const frameToX = useCallback((frame) => {
-    const trackW = (trackAreaRef.current?.clientWidth ?? 400) - LABEL_W;
-    return LABEL_W + ((frame - startFrame) / totalFrames) * trackW;
-  }, [startFrame, totalFrames]);
-
   const xToFrame = useCallback((clientX) => {
     const rect = trackAreaRef.current?.getBoundingClientRect();
     if (!rect) return startFrame;
-    const localX = clientX - rect.left - LABEL_W;
-    const trackW = rect.width - LABEL_W;
+    const localX = clientX - rect.left - LABEL_W - TRACK_PAD;
+    const trackW = rect.width - LABEL_W - 2 * TRACK_PAD;
     const frac   = clamp(localX / trackW, 0, 1);
     return Math.round(startFrame + frac * totalFrames);
   }, [startFrame, totalFrames]);
@@ -216,12 +210,8 @@ export function TimelinePanel() {
     anim.stop();
   }, [anim]);
 
-  /* ── Playhead pixel position ─────────────────────────────────────────── */
-  const playheadX = frameToX(currentFrame);
-
   /* ── Ruler tick marks ────────────────────────────────────────────────── */
   const rulerTicks = useMemo(() => {
-    const trackW = 400; // approximate, re-computed on render
     const step   = totalFrames <= 24  ? 1
                  : totalFrames <= 120 ? 5
                  : totalFrames <= 480 ? 10
@@ -368,26 +358,27 @@ export function TimelinePanel() {
               {/* Label column placeholder */}
               <div style={{ width: LABEL_W, minWidth: LABEL_W }} className="border-r border-border shrink-0" />
 
-              {/* Tick marks — rendered as absolutely positioned inside the ruler */}
+              {/* Tick marks — padded inner wrapper so edges don't clip */}
               <div className="relative flex-1 overflow-hidden cursor-col-resize">
-                {rulerTicks.map(f => {
-                  const frac = (f - startFrame) / totalFrames;
-                  const xPct = frac * 100;
-                  return (
-                    <div
-                      key={f}
-                      className="absolute top-0 flex flex-col items-center"
-                      style={{ left: `${xPct}%`, transform: 'translateX(-50%)' }}
-                    >
-                      <div className="w-px bg-border" style={{ height: f % (fps || 24) === 0 ? 8 : 4, marginTop: f % (fps || 24) === 0 ? 0 : 4 }} />
-                      {f % (fps || 24) === 0 && (
-                        <span className="text-[9px] text-muted-foreground leading-none mt-0.5">
-                          {f}
-                        </span>
-                      )}
-                    </div>
-                  );
-                })}
+                <div className="absolute inset-y-0" style={{ left: TRACK_PAD, right: TRACK_PAD }}>
+                  {rulerTicks.map(f => {
+                    const frac = (f - startFrame) / totalFrames;
+                    return (
+                      <div
+                        key={f}
+                        className="absolute top-0 flex flex-col items-center"
+                        style={{ left: `${frac * 100}%`, transform: 'translateX(-50%)' }}
+                      >
+                        <div className="w-px bg-border" style={{ height: f % (fps || 24) === 0 ? 8 : 4, marginTop: f % (fps || 24) === 0 ? 0 : 4 }} />
+                        {f % (fps || 24) === 0 && (
+                          <span className="text-[9px] text-muted-foreground leading-none mt-0.5">
+                            {f}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
 
@@ -410,8 +401,9 @@ export function TimelinePanel() {
                   <span className="truncate">{row.name}</span>
                 </div>
 
-                {/* Keyframe diamonds */}
+                {/* Keyframe diamonds — padded inner wrapper */}
                 <div className="relative flex-1 overflow-hidden">
+                <div className="absolute inset-y-0" style={{ left: TRACK_PAD, right: TRACK_PAD }}>
                   {row.times.map(timeMs => {
                     const frame = msToFrame(timeMs, fps);
                     const frac  = (frame - startFrame) / totalFrames;
@@ -437,6 +429,7 @@ export function TimelinePanel() {
                     );
                   })}
                 </div>
+                </div>
               </div>
             ))}
 
@@ -447,7 +440,7 @@ export function TimelinePanel() {
               return (
                 <div
                   className="absolute top-0 bottom-0 w-px bg-primary/80 pointer-events-none z-20"
-                  style={{ left: `calc(${LABEL_W}px + ${frac * 100}% - ${LABEL_W * frac}px)` }}
+                  style={{ left: `calc(${LABEL_W + TRACK_PAD}px + ${frac * 100}% - ${(LABEL_W + 2 * TRACK_PAD) * frac}px)` }}
                 >
                   {/* Playhead triangle head */}
                   <div className="absolute -top-0 left-1/2 -translate-x-1/2 w-0 h-0

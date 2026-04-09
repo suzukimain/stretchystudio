@@ -31,12 +31,40 @@ export const useAnimationStore = create((set, get) => ({
   /** Internal: last rAF timestamp for delta computation */
   _lastTimestamp: null,
 
-  /** Computed pose overrides: Map<nodeId, {x?, y?, rotation?, scaleX?, scaleY?, hSkew?, opacity?}> */
-  poseOverrides: new Map(),
+  /**
+   * Rest pose — snapshot of every node's transform + opacity captured when
+   * entering animation mode.  Used to auto-insert a "base" keyframe at
+   * startFrame when a node is first keyframed at a later time, so that
+   * interpolation from frame 0 stays correct.
+   *
+   * Map<nodeId, { x, y, rotation, scaleX, scaleY, hSkew, pivotX, pivotY, opacity }>
+   */
+  restPose: new Map(),
 
   // ── Setters ──────────────────────────────────────────────────────────────
 
   setActiveAnimationId: (id) => set({ activeAnimationId: id }),
+
+  /**
+   * Snapshot every node's transform + opacity.  Call this when entering
+   * animation mode so we have a "base pose" to auto-insert at frame 0.
+   */
+  captureRestPose: (nodes) => {
+    const rp = new Map();
+    for (const n of nodes) {
+      const t = n.transform ?? {};
+      rp.set(n.id, {
+        x:        t.x        ?? 0,
+        y:        t.y        ?? 0,
+        rotation: t.rotation ?? 0,
+        scaleX:   t.scaleX   ?? 1,
+        scaleY:   t.scaleY   ?? 1,
+        hSkew:    t.hSkew    ?? 0,
+        opacity:  n.opacity  ?? 1,
+      });
+    }
+    set({ restPose: rp });
+  },
   setFps:        (fps)   => set({ fps: Math.max(1, Math.round(fps)) }),
   setSpeed:      (speed) => set({ speed: Math.max(0, Math.min(4, speed)) }),
   setLoop:       (loop)  => set({ loop }),

@@ -228,13 +228,28 @@ export default function CanvasViewport({ remeshRef, deleteMeshRef }) {
           const node = p.nodes.find(n => n.id === nodeId);
           if (!node) continue;
 
+          const startMs = (anim.startFrame / anim.fps) * 1000;
+          const rest    = anim.restPose.get(nodeId);
+
           for (const prop of KEYFRAME_PROPS) {
             const value = getNodePropertyValue(node, prop);
 
             let track = animation.tracks.find(t => t.nodeId === nodeId && t.property === prop);
+            const isNewTrack = !track;
             if (!track) {
               track = { nodeId, property: prop, keyframes: [] };
               animation.tracks.push(track);
+            }
+
+            // Auto-insert a rest-pose keyframe at startFrame when this is the
+            // first keyframe for this track and we're past the start.
+            // This ensures interpolation from frame 0 works correctly with
+            // group hierarchy — children keep their base position until their
+            // own keyframes kick in.
+            if (isNewTrack && currentTimeMs > startMs && rest) {
+              const baseVal = prop === 'opacity' ? (rest.opacity ?? 1)
+                            : (rest[prop] ?? (prop === 'scaleX' || prop === 'scaleY' ? 1 : 0));
+              upsertKeyframe(track.keyframes, startMs, baseVal, 'linear');
             }
 
             upsertKeyframe(track.keyframes, currentTimeMs, value, 'linear');
@@ -931,7 +946,11 @@ export default function CanvasViewport({ remeshRef, deleteMeshRef }) {
           Staging
         </button>
         <button
-          onClick={() => setEditorMode('animation')}
+          onClick={() => {
+            setEditorMode('animation');
+            // Snapshot rest pose so auto-base keyframes work correctly
+            animRef.current.captureRestPose(projectRef.current.nodes);
+          }}
           className={[
             'px-2.5 py-1 transition-colors border-l border-border',
             editorState.editorMode === 'animation'
