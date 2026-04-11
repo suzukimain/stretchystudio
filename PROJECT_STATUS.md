@@ -1,6 +1,6 @@
 # Stretchy Studio — Project Overview & Status
 
-**Last Updated:** 2026-04-08 · **Current Phase:** M3 Complete · **Next Phase:** M4 (Timeline & Keyframe Animation)
+**Last Updated:** 2026-04-11 · **Current Phase:** M4 Complete · **Next Phase:** M5 (Spritesheet Export)
 
 ---
 
@@ -107,7 +107,10 @@ Project
 - **Layer Panel Tabs**:
   - **Depth Tab**: Flat draw_order list with group-name chips, drag-to-reorder (squeeze behavior), right-click context menu
   - **Groups Tab**: Tree view, drag-to-reparent, collapsible groups with auto-expand on selection
-- **PSD Auto-Organizer** (`psdOrganizer.js`): Character format detection (head/body/extras groups), canonical draw order
+- **PSD Auto-Organizer** (`psdOrganizer.js`):
+  - **Character Format Detection**: Triggers if ≥4 layer names match a library of 23 recognized character tags (e.g., brow, iris, neckwear, topwear, footwear).
+  - **Hierarchical Grouping**: Automatically nests layers into a structured **Head** (with an **Eyes** subgroup), **Body** (with **Upperbody** and **Lowerbody**), and **Extras** hierarchy.
+  - **Preserved Draw Order**: Ensures that the original PSD layer depth is maintained within the new group structure, respecting the artist's manual sequencing.
 - **Renderer Integration**: Per-part world matrices, hierarchical transforms work end-to-end
 - **Mesh Generation Refinements** (`src/mesh/contour.js`, `src/mesh/generate.js`):
   - **Multi-seed contour tracing**: Traces all separated regions (eyes, arms, etc.) independently, not just the first one
@@ -132,64 +135,27 @@ Project
 
 ## 4. Upcoming Milestones
 
-### M4 — Timeline & Keyframe Animation (Next)
+### ✅ M4 — Timeline & Animation Management (Completed 2026-04-11)
+- **Editor Mode Toggle**: `Staging` (M3 setup) | `Animation` (M4 timeline) modes. Toggle located in top-left of canvas.
+- **Timeline Interaction Engine**:
+  - **Draggable Keyframes**: Left-click and drag diamond markers to adjust timing; snaps to integer frames.
+  - **Multi-Selection & Box Select**: Shift-click to toggle, or drag a marquee box in the track background to select groups of keyframes.
+  - **Group Move**: Move multiple selected keyframes at once, preserving relative timing.
+  - **Clipboard (Ctrl+C/V)**: Copy-paste keyframes across different nodes or different times.
+  - **Deletion**: Support for `Backspace`/`Delete` for group removal.
+- **Animation Management Panel**:
+  - **New Sidebar Section**: Dedicated "Animations" panel in the right sidebar below the Inspector.
+  - **CRUD Operations**: Create new clips, switch active clip (auto-resets playhead), rename with edit pencil icon, and delete with confirmation modal.
+- **Ruler & Loop Handling**:
+  - **Draggable Loop Markers**: Ruler contains Start and End flags to visually define loop ranges.
+  - **Transport Controls**: Play/Pause/Stop/Loop toggles with numeric FPS and current frame fields.
+- **Playback & Interpolation**: 
+  - Smooth transform lerping driven by the rAF loop.
+  - Animation properties are separated from base node state via a `poseOverrides` map.
+- **Mode-based UI Persistence**: Timeline and Animation panels automatically hide in `Staging` mode to keep the workspace clean for mesh setup.
+- **UI UX Polish**: Alt+Scroll zooming for horizontal scale, native overflow for panning.
 
-**Goal:** AE-lite timeline for posing and animating.
-
-**What to build:**
-1. **Editor Mode Toggle** (top-left of CanvasViewport):
-   - Two-state toggle: `Staging` | `Animation`
-   - `Staging` = current M3 workflow (transform gizmo, mesh editing, layer operations)
-   - `Animation` = timeline-active mode (keyframing, playback, pose overrides apply)
-   - Stored in `editorStore` as `editorMode: 'staging' | 'animation'`
-   - Toggle sits as an absolute-positioned overlay at `top-2 left-2` in CanvasViewport, `z-10`
-
-2. **AnimationStore** (`src/store/animationStore.js`):
-   - `currentTime`, `isPlaying`, `duration`, `fps`
-   - `activeAnimationId`
-   - `poseOverrides`: Map of `nodeId → interpolated {x, y, rotation, scaleX, scaleY, opacity}`
-
-3. **Animation Data Model**:
-   ```
-   project.animations = [{
-     id, name, duration (ms), fps,
-     tracks: [{
-       nodeId,
-       property: 'x' | 'y' | 'rotation' | 'scaleX' | 'scaleY' | 'opacity' | 'mesh_verts',
-       keyframes: [{ time (ms), value, easing: 'linear' | 'ease' }]
-     }]
-   }]
-   ```
-
-4. **Timeline Transport Controls** (`src/components/timeline/`):
-   - **Current Frame** field — shows/sets playhead position (integer frame number)
-   - **Start Frame** field — first frame of loop range (default 0)
-   - **End Frame** field — last frame of loop range (default = duration × fps)
-   - Start/End determine the loop window during playback
-   - **Speed slider** — playback rate multiplier, default 0 (paused), range 0×–2×
-   - **FPS field** — frames per second for this animation clip (integer, default 24)
-
-5. **Timeline UI** (`src/components/timeline/`):
-   - Horizontal tracks per node (collapsible)
-   - Keyframe diamonds (◆) at time positions
-   - Scrubber/playhead for seeking
-   - Play/Pause/Stop/Loop transport buttons
-
-6. **Keyframe Workflow**:
-   - Press **K** at scrubber position → snapshot current transforms into keyframes
-   - Auto-keyframe toggle: any transform drag auto-records keyframe
-
-7. **Playback Engine**:
-   - rAF loop reads `currentTime`, interpolates between keyframes
-   - Applies to `poseOverrides` (does NOT mutate `projectStore`)
-   - Renderer reads overrides during draw if playing
-   - Respects Start/End frame loop range and Speed multiplier
-
-8. **Mesh Warp Keyframes**:
-   - `mesh_verts` property stores `Float32Array` snapshot of vertex positions
-   - Interpolated per-vertex during playback (enables tail-wag, leg-bend, etc.)
-
-**Exit Criteria:** Import PSD → group head → K (pose 1) → scrub → K (pose 2) → Play → head rotates smoothly. Mesh warp: bend tail → K → K → Play → tail wags.
+**Exit Criteria Met:** User can import PSD, setup groups, switch to Animation mode, create multiple clips ("Idle", "Walk"), pose with draggable keyframes, copy-paste poses between nodes, and play back loops smoothly. 
 
 ---
 
@@ -283,7 +249,7 @@ World matrices computed each frame from node tree + pose overrides. No caching i
 
 | Metric | Value |
 |--------|-------|
-| **Status** | M3 production-ready; M4 design in progress (mode toggle, timeline controls) |
+| **Status** | M4 Complete; M5 design in progress (frame capture, export dialogs) |
 | **Files Modified/Created** | 15+ |
 | **Line Count** (core) | ~3100 (renderer + store + UI + alpha picking) |
 | **Bundle Size** | 587 KB minified, 187 KB gzipped |
@@ -341,7 +307,7 @@ World matrices computed each frame from node tree + pose overrides. No caching i
 
 ✅ PNG import → single layer renders without mesh (quad fallback)  
 ✅ PSD import → all layers with correct names & z-order, no mesh by default  
-✅ Character format detection → auto-creates Head/Body/Extras groups  
+✅ Character format detection → auto-creates Head (with Eyes), Body (with Upper/Lowerbody), and Extras groups while preserving the original draw order  
 ✅ Group creation → new group node with default transform  
 ✅ Transform gizmo → drag move/rotate handles; bounding box crops to opaque pixels  
 ✅ Inspector numeric inputs → live canvas updates  
@@ -360,20 +326,12 @@ World matrices computed each frame from node tree + pose overrides. No caching i
 
 ## 10. Next Steps
 
-1. **M4 Timeline** (next sprint):
-   - Implement editor mode toggle (`Staging` | `Animation`) in top-left CanvasViewport
-   - Build AnimationStore with poseOverrides, currentTime, isPlaying
-   - Timeline transport controls: Current Frame, Start Frame, End Frame fields, Speed slider, FPS field
-   - Timeline UI with keyframe editor
-   - Playback engine with interpolation respecting loop range and speed multiplier
-   - Integrate renderer to read pose overrides during draw
-   - Keyframe workflow (K key for pose snapshots)
-
-2. **M5 Export** (following sprint):
+1. **M5 Export** (next sprint):
    - Frame capture loop
    - Spritesheet packing
+   - Export settings UI (FPS override, background toggle)
 
-3. **M6+ Advanced**:
+2. **M6+ Advanced**:
    - Physics simulation
    - GIF/video export
    - Undo/redo integration

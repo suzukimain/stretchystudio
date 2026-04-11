@@ -3,7 +3,7 @@
  *
  * Detects whether imported PSD layers follow the expected character part naming
  * convention, and if so, organizes them into a Head / Body / Extras group hierarchy
- * with a correct back-to-front draw_order.
+ * while PRESERVING the original PSD draw order.
  */
 
 export const KNOWN_TAGS = [
@@ -14,18 +14,6 @@ export const KNOWN_TAGS = [
   'tail', 'wings', 'objects',
 ];
 
-// Back-to-front canonical render order
-const DRAW_ORDER_LIST = [
-  'back hair',
-  'wings', 'tail',
-  'neck', 'topwear', 'bottomwear', 'legwear', 'footwear', 'handwear', 'neckwear',
-  'ears', 'face',
-  'eyewhite', 'irides', 'eyebrow', 'eyelash',
-  'nose', 'mouth',
-  'earwear', 'eyewear',
-  'front hair', 'headwear',
-  'objects',
-];
 
 // tag → group path (outermost → innermost)
 const TAG_TO_GROUPS = {
@@ -46,9 +34,9 @@ const TAG_TO_GROUPS = {
   'neckwear':   ['body', 'upperbody'],
   'topwear':    ['body', 'upperbody'],
   'handwear':   ['body', 'upperbody'],
-  'bottomwear': ['body'],
-  'legwear':    ['body'],
-  'footwear':   ['body'],
+  'bottomwear': ['body', 'lowerbody'],
+  'legwear':    ['body', 'lowerbody'],
+  'footwear':   ['body', 'lowerbody'],
   'tail':       ['body', 'extras'],
   'wings':      ['body', 'extras'],
   'objects':    ['body', 'extras'],
@@ -59,12 +47,13 @@ const GROUP_PARENT = {
   eyes:      'head',
   head:      'upperbody',
   upperbody: 'body',
+  lowerbody: 'body',
   extras:    'body',
   body:      null,
 };
 
 // Creation order — parents before children
-const GROUP_CREATE_ORDER = ['body', 'upperbody', 'head', 'extras', 'eyes'];
+const GROUP_CREATE_ORDER = ['body', 'upperbody', 'lowerbody', 'head', 'extras', 'eyes'];
 
 /** Returns the matched tag for a layer name, or null. */
 export function matchTag(name) {
@@ -117,24 +106,15 @@ export function organizeCharacterLayers(layers, uidFn) {
     groupDefs.push({ id, name: gName, parentId: GROUP_PARENT[gName] ? groupIds[GROUP_PARENT[gName]] : null });
   }
 
-  // Sort layers: primary = DRAW_ORDER_LIST index, secondary = original order (stable)
-  const drawIdx = tag => {
-    const i = DRAW_ORDER_LIST.indexOf(tag);
-    return i === -1 ? DRAW_ORDER_LIST.length : i;
-  };
-  const sorted = [...tagged].sort((a, b) => {
-    const d = drawIdx(a.tag) - drawIdx(b.tag);
-    return d !== 0 ? d : a.i - b.i;
-  });
-
   // Build assignments map: original layer index → { parentGroupId, drawOrder }
   const assignments = new Map();
-  sorted.forEach((item, sortedIdx) => {
+  const numLayers = layers.length;
+  tagged.forEach((item) => {
     const groups = item.tag ? TAG_TO_GROUPS[item.tag] : null;
     const innermost = groups ? groups[groups.length - 1] : null;
     assignments.set(item.i, {
       parentGroupId: innermost ? (groupIds[innermost] ?? null) : null,
-      drawOrder: sortedIdx,
+      drawOrder: numLayers - 1 - item.i,
     });
   });
 

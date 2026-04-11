@@ -202,8 +202,10 @@ export function LayerPanel() {
   const dragNodeId = useRef(null);
   const [dragOverId, setDragOverId] = useState(null);
 
-  // Expanded groups in Groups tab
-  const [expanded, setExpanded] = useState(new Set());
+  const expanded          = useEditorStore(s => s.expandedGroups);
+  const toggleGroupExpand = useEditorStore(s => s.toggleGroupExpand);
+  const expandGroup       = useEditorStore(s => s.expandGroup);
+  const setExpandedGroups = useEditorStore(s => s.setExpandedGroups);
 
   // ── Depth tab actions ─────────────────────────────────────────────────
 
@@ -259,12 +261,8 @@ export function LayerPanel() {
   // ── Groups tab actions ────────────────────────────────────────────────
 
   const toggleExpand = useCallback((id) => {
-    setExpanded(prev => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
-  }, []);
+    toggleGroupExpand(id);
+  }, [toggleGroupExpand]);
 
   const onDragStart = useCallback((e, nodeId) => {
     dragNodeId.current = nodeId;
@@ -282,7 +280,7 @@ export function LayerPanel() {
     // Only allow dropping onto a group node, or onto a part (reparent to part's parent)
     if (target?.type === 'group') {
       reparentNode(sourceId, targetId);
-      setExpanded(prev => new Set([...prev, targetId]));
+      expandGroup(targetId);
     } else if (target?.type === 'part') {
       // Drop onto a part → reparent to that part's parent (same level)
       reparentNode(sourceId, target.parent ?? null);

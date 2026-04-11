@@ -165,4 +165,22 @@ export const useAnimationStore = create((set, get) => ({
     set({ currentTime: newTime, _lastTimestamp: timestamp });
     return true;
   },
+
+  /**
+   * Switch to a new animation clip and reset playback state.
+   */
+  switchAnimation: (anim) => {
+    if (!anim) return;
+    set({
+      activeAnimationId: anim.id,
+      fps:               anim.fps ?? 24,
+      currentTime:       0,
+      isPlaying:         false,
+      _lastTimestamp:    null,
+      draftPose:         new Map(),
+      // start/end frames derived from duration if not present
+      startFrame:        0,
+      endFrame:          Math.round(((anim.duration ?? 2000) / 1000) * (anim.fps ?? 24)),
+    });
+  },
 }));

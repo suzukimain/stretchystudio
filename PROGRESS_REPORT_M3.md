@@ -77,7 +77,7 @@ M3 delivers a foundational scene graph system with hierarchical parent-child rel
 - `matchTag(name)` — extracts tag from layer name (handles `handwear-1`, `eyebrow_L`, etc.)
 - Recognizes 23 character part tags: back hair, front hair, headwear, face, irides, eyebrow, eyewhite, eyelash, eyewear, ears, earwear, nose, mouth, neck, neckwear, topwear, handwear, bottomwear, legwear, footwear, tail, wings, objects
 - `organizeCharacterLayers(layers, uidFn)` — returns group hierarchy + per-layer draw_order assignments
-- Group structure: **Head** (with **Eyes** subgroup) / **Body** / **Extras**
+- Group structure: **Head** (with **Eyes** subgroup) / **Body** (with **Upperbody** and **Lowerbody** subgroups) / **Extras**
 - Canonical draw order: back hair → wings/tail → body parts → head parts → front hair/headwear → objects
 
 ## 🐛 Bugs Fixed (This Session)
@@ -157,7 +157,7 @@ Project (canvas + nodes + textures)
 
 ✅ Import PNG → creates part with default transform  
 ✅ Import PSD → creates parts for all rasterized layers, auto-generates meshes, correct opacity & z-order  
-✅ Import PSD with character format → detects & shows organize modal, auto-creates Head/Body/Extras groups with correct hierarchy & draw order  
+✅ Import PSD with character format → detects & shows organize modal, auto-creates Head/Body/Lowerbody/Extras groups with correct hierarchy & draw order  
 ✅ Create group → new group node with default transform  
 ✅ Select part/group → shows in Inspector, gizmo appears on canvas  
 ✅ Edit transforms via Inspector numeric inputs → live update on canvas  

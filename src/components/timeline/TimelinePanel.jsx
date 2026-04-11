@@ -2,7 +2,6 @@ import React, { useRef, useCallback, useEffect, useState, useMemo } from 'react'
 import { useAnimationStore } from '@/store/animationStore';
 import { useProjectStore } from '@/store/projectStore';
 import { useEditorStore } from '@/store/editorStore';
-// animationEngine utilities available if needed for track labels
 
 /* ──────────────────────────────────────────────────────────────────────────
    Constants
@@ -23,10 +22,10 @@ function uid() { return Math.random().toString(36).slice(2, 9); }
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
 
 /** Frame number from time (ms) */
-function msToFrame(ms, fps) { return Math.round((ms / 1000) * fps); }
+function msToFrame(ms, fps) { return Math.round((ms / 1000) * Math.max(1, fps)); }
 
 /** Time (ms) from frame number */
-function frameToMs(frame, fps) { return (frame / fps) * 1000; }
+function frameToMs(frame, fps) { return (frame / Math.max(1, fps)) * 1000; }
 
 /* ──────────────────────────────────────────────────────────────────────────
    Transport button (play/pause/stop/loop icons)
@@ -90,7 +89,23 @@ export function TimelinePanel() {
   const sel    = useEditorStore(s => s.selection);
 
   const trackAreaRef = useRef(null);
-  const isDraggingPlayhead = useRef(false);
+  const rulerRef = useRef(null);
+  
+  // State for selection and clipboard
+  const [selectedKeyframes, setSelectedKeyframes] = useState(new Set()); // Set of "nodeId:timeMs"
+  const [selectionBox, setSelectionBox] = useState(null); // {x, y, w, h}
+  const [clipboard, setClipboard] = useState(null); // { properties: { prop: val }, easing: string }
+
+  // Ref to manage drag states without re-rendering continuously
+  const dragCtx = useRef({
+    type: null, // "playhead", "keyframe", "box", "loopStart", "loopEnd"
+    startX: 0,
+    startY: 0,
+    startScrollX: 0,
+    startScrollY: 0,
+    startFrame: 0,
+    origKeyframes: [], // [{ nodeId, origTimeMs, props: [{propName, origTimeMs}] }]
+  });
 
   /* ── Active animation object ────────────────────────────────────────── */
   const animation = useMemo(
@@ -101,8 +116,8 @@ export function TimelinePanel() {
   /* ── Derived values ─────────────────────────────────────────────────── */
   const fps         = anim.fps;
   const currentFrame = msToFrame(anim.currentTime, fps);
-  const endFrame    = anim.endFrame;
-  const startFrame  = anim.startFrame;
+  const endFrame    = Math.max(1, anim.endFrame);
+  const startFrame  = Math.max(0, anim.startFrame);
   const totalFrames = Math.max(endFrame - startFrame, 1);
 
   /* ── Auto-select animation when one exists ───────────────────────────── */
@@ -135,32 +150,327 @@ export function TimelinePanel() {
   }, [proj.animations, update, anim]);
 
   /* ── Timeline pixel helpers ─────────────────────────────────────────── */
+  // clientX to global frame mapping, respecting zoom
   const xToFrame = useCallback((clientX) => {
-    const rect = trackAreaRef.current?.getBoundingClientRect();
-    if (!rect) return startFrame;
-    const localX = clientX - rect.left - LABEL_W - TRACK_PAD;
-    const trackW = rect.width - LABEL_W - 2 * TRACK_PAD;
+    if (!rulerRef.current) return startFrame;
+    const rect = rulerRef.current.getBoundingClientRect();
+    // width is the inner width of ruler track (zoom factored in since ruler scales)
+    const localX = clientX - rect.left - TRACK_PAD;
+    const trackW = rect.width - 2 * TRACK_PAD;
     const frac   = clamp(localX / trackW, 0, 1);
     return Math.round(startFrame + frac * totalFrames);
   }, [startFrame, totalFrames]);
 
-  /* ── Playhead drag on ruler ──────────────────────────────────────────── */
+  // Frame to percentage width for positioning
+  const frameToPercentage = useCallback((frame) => {
+    const frac = (frame - startFrame) / totalFrames;
+    return `${frac * 100}%`;
+  }, [startFrame, totalFrames]);
+
+  /* ── Drag Handlers ──────────────────────────────────────────────────── */
+
+  // Playhead dragging
   const onRulerPointerDown = useCallback((e) => {
-    e.currentTarget.setPointerCapture(e.pointerId);
-    isDraggingPlayhead.current = true;
+    dragCtx.current = { type: 'playhead' };
     const frame = xToFrame(e.clientX);
     anim.seekFrame(clamp(frame, startFrame, endFrame));
+    
+    const handleMove = (ev) => {
+      const frame = xToFrame(ev.clientX);
+      anim.seekFrame(clamp(frame, startFrame, endFrame));
+    };
+    const handleUp = () => {
+      window.removeEventListener('pointermove', handleMove);
+      window.removeEventListener('pointerup', handleUp);
+      dragCtx.current.type = null;
+    };
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('pointerup', handleUp);
   }, [xToFrame, anim, startFrame, endFrame]);
 
-  const onRulerPointerMove = useCallback((e) => {
-    if (!isDraggingPlayhead.current) return;
-    const frame = xToFrame(e.clientX);
-    anim.seekFrame(clamp(frame, startFrame, endFrame));
-  }, [xToFrame, anim, startFrame, endFrame]);
+  // Keyframe clicking & dragging
+  const onKeyframePointerDown = useCallback((e, nodeId, timeMs) => {
+    e.stopPropagation();
+    
+    const id = `${nodeId}:${timeMs}`;
+    let newSel = new Set(selectedKeyframes);
+    
+    // Shift click toggles selection
+    if (e.shiftKey) {
+      if (newSel.has(id)) newSel.delete(id);
+      else newSel.add(id);
+      setSelectedKeyframes(newSel);
+    } 
+    // Normal click selects only this, unless it's already selected
+    else {
+      if (!newSel.has(id)) {
+        newSel = new Set([id]);
+        setSelectedKeyframes(newSel);
+      }
+    }
 
-  const onRulerPointerUp = useCallback(() => {
-    isDraggingPlayhead.current = false;
-  }, []);
+    // Prepare drag context
+    const orig = [];
+    if (animation) {
+      for (const track of animation.tracks) {
+        for (const kf of track.keyframes) {
+          if (newSel.has(`${track.nodeId}:${kf.time}`)) {
+             orig.push({ trackNodeId: track.nodeId, prop: track.property, origTimeMs: kf.time });
+          }
+        }
+      }
+    }
+
+    dragCtx.current = {
+      type: 'keyframe',
+      startX: e.clientX,
+      startFrame: msToFrame(timeMs, fps),
+      origKeyframes: orig,
+    };
+
+    const handleMove = (ev) => {
+      const dragFrameDelta = xToFrame(ev.clientX) - dragCtx.current.startFrame;
+      if (dragFrameDelta !== 0) {
+        let nextSel = new Set();
+        update((p) => {
+          const a = p.animations.find(x => x.id === anim.activeAnimationId);
+          if (!a) return;
+          for (const item of dragCtx.current.origKeyframes) {
+            const track = a.tracks.find(t => t.nodeId === item.trackNodeId && t.property === item.prop);
+            if (track) {
+              const kf = track.keyframes.find(k => k.time === item.origTimeMs);
+              if (kf) {
+                const newFrame = Math.max(0, msToFrame(item.origTimeMs, fps) + dragFrameDelta);
+                kf.time = frameToMs(newFrame, fps);
+                nextSel.add(`${item.trackNodeId}:${kf.time}`);
+              }
+            }
+          }
+           // Sort tracks by time to ensure play engine doesn't trip up
+          a.tracks.forEach(t => t.keyframes.sort((k1, k2) => k1.time - k2.time));
+        });
+        
+        // Update selection to match new times
+        if (nextSel.size > 0) {
+           setSelectedKeyframes(nextSel);
+           dragCtx.current.origKeyframes = dragCtx.current.origKeyframes.map(item => {
+               const newFrame = Math.max(0, msToFrame(item.origTimeMs, fps) + dragFrameDelta);
+               return { ...item, origTimeMs: frameToMs(newFrame, fps) };
+           });
+           dragCtx.current.startFrame += dragFrameDelta;
+        }
+      }
+    };
+
+    const handleUp = () => {
+      window.removeEventListener('pointermove', handleMove);
+      window.removeEventListener('pointerup', handleUp);
+      dragCtx.current.type = null;
+    };
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('pointerup', handleUp);
+
+  }, [selectedKeyframes, animation, anim.activeAnimationId, fps, xToFrame, update]);
+
+  // Box Selection
+  const onTrackAreaPointerDown = useCallback((e) => {
+    if (e.target.closest('.keyframe-diamond') || e.target.closest('.ruler-track')) return;
+    if (!trackAreaRef.current) return;
+    
+    // Deselect if clicking empty space without shift
+    if (!e.shiftKey) setSelectedKeyframes(new Set());
+
+    const rect = trackAreaRef.current.getBoundingClientRect();
+    dragCtx.current = {
+      type: 'box',
+      startX: e.clientX,
+      startY: e.clientY,
+      rectLeft: rect.left + LABEL_W, // Track area only
+      rectTop: rect.top,
+      startScrollX: trackAreaRef.current.scrollLeft,
+      startScrollY: trackAreaRef.current.scrollTop
+    };
+
+    setSelectionBox({
+      x: e.clientX - rect.left - LABEL_W + dragCtx.current.startScrollX, 
+      y: e.clientY - rect.top + dragCtx.current.startScrollY,
+      w: 0, 
+      h: 0
+    });
+
+    const handleMove = (ev) => {
+      const dx = ev.clientX - dragCtx.current.startX;
+      const dy = ev.clientY - dragCtx.current.startY;
+      
+      const scrollDx = trackAreaRef.current.scrollLeft - dragCtx.current.startScrollX;
+      const scrollDy = trackAreaRef.current.scrollTop - dragCtx.current.startScrollY;
+
+      // Calculate Box rect in scrollable content coordinates
+      let bx = dragCtx.current.startX - dragCtx.current.rectLeft + dragCtx.current.startScrollX;
+      let by = dragCtx.current.startY - dragCtx.current.rectTop + dragCtx.current.startScrollY;
+      let bw = dx + scrollDx;
+      let bh = dy + scrollDy;
+
+      if (bw < 0) { bx += bw; bw = Math.abs(bw); }
+      if (bh < 0) { by += bh; bh = Math.abs(bh); }
+
+      setSelectionBox({ x: bx, y: by, w: bw, h: bh });
+    };
+
+    const handleUp = () => {
+      window.removeEventListener('pointermove', handleMove);
+      window.removeEventListener('pointerup', handleUp);
+      dragCtx.current.type = null;
+      
+      // Perform Intersection test
+      if (animation) {
+         setSelectionBox(prevBox => {
+            if (prevBox && prevBox.w > 5 && prevBox.h > 5) {
+               let newSel = new Set(e.shiftKey ? selectedKeyframes : []);
+               
+               const trackRows = Array.from(new Map(
+                 animation.tracks.map(t => [t.nodeId, t])
+               ).keys());
+
+               for (let rIndex = 0; rIndex < trackRows.length; rIndex++) {
+                 const nodeId = trackRows[rIndex];
+                 const rowY = RULER_H + (rIndex * ROW_H);
+                 
+                 // If row intersects box Y
+                 if (rowY + ROW_H > prevBox.y && rowY < prevBox.y + prevBox.h) {
+                    const tracksForNode = animation.tracks.filter(t => t.nodeId === nodeId);
+                    const times = [...new Set(tracksForNode.flatMap(t => t.keyframes.map(k => k.time)))];
+                    
+                    for (const timeMs of times) {
+                       const frame = msToFrame(timeMs, fps);
+                       const frac = (frame - startFrame) / totalFrames;
+                       if (frac >= 0 && frac <= 1) {
+                         const trackW = rulerRef.current?.getBoundingClientRect().width - 2 * TRACK_PAD;
+                         if (trackW) {
+                           const kfX = TRACK_PAD + (frac * trackW);
+                           // Intersect X
+                           if (kfX > prevBox.x && kfX < prevBox.x + prevBox.w) {
+                              newSel.add(`${nodeId}:${timeMs}`);
+                           }
+                         }
+                       }
+                    }
+                 }
+               }
+               setSelectedKeyframes(newSel);
+            }
+            return null;
+         });
+      } else {
+         setSelectionBox(null);
+      }
+    };
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('pointerup', handleUp);
+  }, [animation, startFrame, totalFrames, fps, selectedKeyframes]);
+
+  /* ── Clipboard Actions ──────────────────────────────────────────────── */
+  const copyKeyframe = useCallback((nodeId, timeMs) => {
+    if (!animation) return;
+    const props = {};
+    let easing  = 'linear';
+
+    for (const track of animation.tracks) {
+      if (track.nodeId !== nodeId) continue;
+      const kf = track.keyframes.find(k => k.time === timeMs);
+      if (kf) {
+        props[track.property] = kf.value;
+        easing = kf.easing ?? 'linear';
+      }
+    }
+
+    if (Object.keys(props).length > 0) {
+      setClipboard({ properties: props, easing });
+    }
+  }, [animation]);
+
+  const pasteKeyframes = useCallback(() => {
+    if (!clipboard || !animation || sel.length === 0) return;
+
+    update((p) => {
+      const a = p.animations.find(x => x.id === anim.activeAnimationId);
+      if (!a) return;
+
+      const timeMs = anim.currentTime;
+
+      for (const nodeId of sel) {
+        for (const [prop, value] of Object.entries(clipboard.properties)) {
+          let track = a.tracks.find(t => t.nodeId === nodeId && t.property === prop);
+          if (!track) {
+            track = { nodeId, property: prop, keyframes: [] };
+            a.tracks.push(track);
+          }
+
+          const existingIdx = track.keyframes.findIndex(kf => kf.time === timeMs);
+          if (existingIdx >= 0) {
+            track.keyframes[existingIdx].value = value;
+            track.keyframes[existingIdx].easing = clipboard.easing;
+          } else {
+            track.keyframes.push({ time: timeMs, value, easing: clipboard.easing });
+            track.keyframes.sort((a, b) => a.time - b.time);
+          }
+        }
+      }
+    });
+  }, [clipboard, animation, sel, anim.currentTime, anim.activeAnimationId, update]);
+
+  /* ── Delete Selection ────────────────────────────────────────────────── */
+  const deleteSelectedKeyframes = useCallback(() => {
+    if (selectedKeyframes.size === 0) return;
+    
+    update((p) => {
+      const a = p.animations.find(x => x.id === anim.activeAnimationId);
+      if (!a) return;
+      for (const track of a.tracks) {
+        track.keyframes = track.keyframes.filter(kf => !selectedKeyframes.has(`${track.nodeId}:${kf.time}`));
+      }
+      a.tracks = a.tracks.filter(t => t.keyframes.length > 0);
+    });
+    setSelectedKeyframes(new Set());
+  }, [update, anim.activeAnimationId, selectedKeyframes]);
+
+  // Keybindings
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      const target = e.target;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
+
+      if (e.key === 'Backspace' || e.key === 'Delete') {
+        deleteSelectedKeyframes();
+      } else if (e.ctrlKey || e.metaKey) {
+        if (e.key === 'c') {
+          if (selectedKeyframes.size > 0) {
+            // Copy the "first" one in selection
+            const first = selectedKeyframes.values().next().value;
+            const [nodeId, timeMsStr] = first.split(':');
+            copyKeyframe(nodeId, parseFloat(timeMsStr));
+          }
+        } else if (e.key === 'v') {
+          pasteKeyframes();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [deleteSelectedKeyframes, selectedKeyframes, copyKeyframe, pasteKeyframes]);
+
+
+  /* ── Context Menu state ─────────────────────────────────────────────── */
+  const [contextMenu, setContextMenu] = useState(null); // { x, y, nodeId, timeMs }
+
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
+
+  useEffect(() => {
+    if (contextMenu) {
+      window.addEventListener('click', closeContextMenu);
+      return () => window.removeEventListener('click', closeContextMenu);
+    }
+  }, [contextMenu, closeContextMenu]);
 
   /* ── Build track rows ────────────────────────────────────────────────── */
   // Group tracks by nodeId, show one row per node that has any keyframe.
@@ -183,21 +493,6 @@ export function TimelinePanel() {
         times:  [...new Set(tracks.flatMap(t => t.keyframes.map(kf => kf.time)))].sort((a, b) => a - b),
       }));
   }, [animation, proj.nodes]);
-
-  /* ── Delete a keyframe ───────────────────────────────────────────────── */
-  const deleteKeyframe = useCallback((nodeId, timeMs) => {
-    update((p) => {
-      const a = p.animations.find(x => x.id === anim.activeAnimationId);
-      if (!a) return;
-      for (const track of a.tracks) {
-        if (track.nodeId !== nodeId) continue;
-        const idx = track.keyframes.findIndex(kf => kf.time === timeMs);
-        if (idx >= 0) track.keyframes.splice(idx, 1);
-      }
-      // Remove empty tracks
-      a.tracks = a.tracks.filter(t => t.keyframes.length > 0);
-    });
-  }, [update, anim.activeAnimationId]);
 
   /* ── Transport ───────────────────────────────────────────────────────── */
   const togglePlay = useCallback(() => {
@@ -334,8 +629,11 @@ export function TimelinePanel() {
         </span>
       </div>
 
-      {/* ── Track area ──────────────────────────────────────────────────── */}
-      <div className="flex-1 overflow-auto relative" ref={trackAreaRef}>
+      <div 
+        className="flex-1 overflow-auto relative select-none" 
+        ref={trackAreaRef}
+        onPointerDown={onTrackAreaPointerDown}
+      >
         {trackRows.length === 0 ? (
           <div className="absolute inset-0 flex items-center justify-center">
             <p className="text-[11px] text-muted-foreground/60">
@@ -345,29 +643,37 @@ export function TimelinePanel() {
             </p>
           </div>
         ) : (
-          <div className="relative min-w-full" style={{ minHeight: RULER_H + trackRows.length * ROW_H }}>
+          <div className="relative min-w-full isolate" style={{ minHeight: RULER_H + trackRows.length * ROW_H }}>
+
+            {/* Selection Box */}
+            {selectionBox && (
+              <div 
+                className="absolute border border-primary bg-primary/20 pointer-events-none z-50 mix-blend-screen"
+                style={{
+                  left: selectionBox.x + LABEL_W, top: selectionBox.y,
+                  width: selectionBox.w, height: selectionBox.h
+                }}
+              />
+            )}
 
             {/* Ruler */}
             <div
-              className="sticky top-0 z-10 flex bg-card border-b border-border"
+              className="sticky top-0 z-40 flex bg-card border-b border-border ruler-track"
               style={{ height: RULER_H }}
               onPointerDown={onRulerPointerDown}
-              onPointerMove={onRulerPointerMove}
-              onPointerUp={onRulerPointerUp}
             >
               {/* Label column placeholder */}
-              <div style={{ width: LABEL_W, minWidth: LABEL_W }} className="border-r border-border shrink-0" />
+              <div style={{ width: LABEL_W, minWidth: LABEL_W }} className="border-r border-border shrink-0 sticky left-0 z-50 bg-card" />
 
               {/* Tick marks — padded inner wrapper so edges don't clip */}
-              <div className="relative flex-1 overflow-hidden cursor-col-resize">
-                <div className="absolute inset-y-0" style={{ left: TRACK_PAD, right: TRACK_PAD }}>
+              <div className="relative flex-1 overflow-hidden cursor-col-resize ruler-track" ref={rulerRef}>
+                <div className="absolute inset-y-0 pointer-events-none" style={{ left: TRACK_PAD, right: TRACK_PAD }}>
                   {rulerTicks.map(f => {
-                    const frac = (f - startFrame) / totalFrames;
                     return (
                       <div
                         key={f}
                         className="absolute top-0 flex flex-col items-center"
-                        style={{ left: `${frac * 100}%`, transform: 'translateX(-50%)' }}
+                        style={{ left: frameToPercentage(f), transform: 'translateX(-50%)' }}
                       >
                         <div className="w-px bg-border" style={{ height: f % (fps || 24) === 0 ? 8 : 4, marginTop: f % (fps || 24) === 0 ? 0 : 4 }} />
                         {f % (fps || 24) === 0 && (
@@ -387,14 +693,14 @@ export function TimelinePanel() {
               <div
                 key={row.nodeId}
                 className={[
-                  'flex border-b border-border/30',
+                  'flex border-b border-border/30 relative text-[11px]',
                   sel.includes(row.nodeId) ? 'bg-primary/5' : 'hover:bg-muted/20',
                 ].join(' ')}
                 style={{ height: ROW_H }}
               >
                 {/* Node label */}
                 <div
-                  className="flex items-center px-2 border-r border-border/30 shrink-0 text-[11px] text-muted-foreground overflow-hidden"
+                  className="flex items-center px-2 border-r border-border/30 shrink-0 text-muted-foreground overflow-hidden sticky left-0 z-30 bg-card/80 backdrop-blur-sm shadow-[1px_0_2px_rgba(0,0,0,0.1)]"
                   style={{ width: LABEL_W, minWidth: LABEL_W }}
                   title={row.name}
                 >
@@ -402,7 +708,7 @@ export function TimelinePanel() {
                 </div>
 
                 {/* Keyframe diamonds — padded inner wrapper */}
-                <div className="relative flex-1 overflow-hidden">
+                <div className="relative flex-1 overflow-visible">
                 <div className="absolute inset-y-0" style={{ left: TRACK_PAD, right: TRACK_PAD }}>
                   {row.times.map(timeMs => {
                     const frame = msToFrame(timeMs, fps);
@@ -410,21 +716,31 @@ export function TimelinePanel() {
                     if (frac < 0 || frac > 1) return null;
 
                     const isAtPlayhead = frame === currentFrame;
+                    const isSelected = selectedKeyframes.has(`${row.nodeId}:${timeMs}`);
 
                     return (
-                      <button
+                      <div
                         key={timeMs}
-                        title={`Frame ${frame} — right-click to delete`}
-                        onContextMenu={e => { e.preventDefault(); deleteKeyframe(row.nodeId, timeMs); }}
-                        onClick={() => anim.seekFrame(frame)}
+                        title={`Frame ${frame} — click to select, drag to move`}
+                        onPointerDown={(e) => onKeyframePointerDown(e, row.nodeId, timeMs)}
+                        onContextMenu={e => {
+                          e.preventDefault();
+                          setContextMenu({
+                            x: e.clientX,
+                            y: e.clientY,
+                            nodeId: row.nodeId,
+                            timeMs
+                          });
+                        }}
                         className={[
-                          'absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-2.5 h-2.5',
-                          'rotate-45 border transition-colors',
-                          isAtPlayhead
-                            ? 'bg-primary border-primary'
-                            : 'bg-card border-primary/60 hover:bg-primary/40',
+                          'absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-3 cursor-ew-resize',
+                          'rotate-45 border transition-colors z-20 keyframe-diamond',
+                          isSelected ? 'bg-primary border-primary shadow-[0_0_4px_rgba(255,255,255,0.5)]'
+                            : isAtPlayhead
+                              ? 'bg-primary border-primary'
+                              : 'bg-background border-primary/60 hover:bg-primary/40',
                         ].join(' ')}
-                        style={{ left: `${frac * 100}%` }}
+                        style={{ left: frameToPercentage(frame) }}
                       />
                     );
                   })}
@@ -439,14 +755,14 @@ export function TimelinePanel() {
               if (frac < 0 || frac > 1) return null;
               return (
                 <div
-                  className="absolute top-0 bottom-0 w-px bg-primary/80 pointer-events-none z-20"
+                  className="absolute top-0 bottom-0 w-px bg-primary/80 pointer-events-none z-40"
                   style={{ left: `calc(${LABEL_W + TRACK_PAD}px + ${frac * 100}% - ${(LABEL_W + 2 * TRACK_PAD) * frac}px)` }}
                 >
                   {/* Playhead triangle head */}
                   <div className="absolute -top-0 left-1/2 -translate-x-1/2 w-0 h-0
                     border-l-[4px] border-l-transparent
                     border-r-[4px] border-r-transparent
-                    border-t-[6px] border-t-primary/80" />
+                    border-t-[6px] border-t-primary" />
                 </div>
               );
             })()}
@@ -454,6 +770,60 @@ export function TimelinePanel() {
           </div>
         )}
       </div>
+
+      {/* ── Keyframe Context Menu ───────────────────────────────────────── */}
+      {contextMenu && (
+        <div
+          className="fixed z-[100] bg-popover border border-border rounded shadow-lg py-1 min-w-[100px] text-[11px]"
+          style={{ top: contextMenu.y, left: contextMenu.x }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            className="w-full text-left px-3 py-1.5 hover:bg-muted transition-colors"
+            onClick={() => {
+              copyKeyframe(contextMenu.nodeId, contextMenu.timeMs);
+              closeContextMenu();
+            }}
+          >
+            Copy
+          </button>
+          <button
+            className="w-full text-left px-3 py-1.5 hover:bg-muted transition-colors disabled:opacity-50"
+            disabled={!clipboard}
+            onClick={() => {
+              pasteKeyframes();
+              closeContextMenu();
+            }}
+          >
+            Paste
+          </button>
+          <div className="h-px bg-border my-1" />
+          <button
+            className="w-full text-left px-3 py-1.5 hover:bg-muted transition-colors text-destructive"
+            onClick={() => {
+              // If the menu target was part of selection, delete selection.
+              // Otherwise, just delete the target keyframe.
+              const targetId = `${contextMenu.nodeId}:${contextMenu.timeMs}`;
+              if (selectedKeyframes.has(targetId)) {
+                deleteSelectedKeyframes();
+              } else {
+                update((p) => {
+                  const a = p.animations.find(x => x.id === anim.activeAnimationId);
+                  if (!a) return;
+                  for (const track of a.tracks) {
+                    if (track.nodeId !== contextMenu.nodeId) continue;
+                    track.keyframes = track.keyframes.filter(kf => kf.time !== contextMenu.timeMs);
+                  }
+                  a.tracks = a.tracks.filter(t => t.keyframes.length > 0);
+                });
+              }
+              closeContextMenu();
+            }}
+          >
+            Remove
+          </button>
+        </div>
+      )}
     </div>
   );
 }

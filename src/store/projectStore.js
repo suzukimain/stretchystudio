@@ -89,4 +89,26 @@ export const useProjectStore = create((set) => ({
     if (node) node.parent = newParentId ?? null;
     state.versionControl.transformVersion++;
   })),
+  /**
+   * Animation CRUD
+   */
+  createAnimation: (name) => set(produce((state) => {
+    const id = uid();
+    state.project.animations.push({
+      id,
+      name:     name ?? `Animation ${state.project.animations.length + 1}`,
+      duration: 2000,
+      fps:      24,
+      tracks:   [],
+    });
+  })),
+
+  renameAnimation: (id, newName) => set(produce((state) => {
+    const anim = state.project.animations.find(a => a.id === id);
+    if (anim) anim.name = newName;
+  })),
+
+  deleteAnimation: (id) => set(produce((state) => {
+    state.project.animations = state.project.animations.filter(a => a.id !== id);
+  })),
 }));

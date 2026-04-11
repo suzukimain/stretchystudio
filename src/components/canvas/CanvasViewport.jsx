@@ -481,10 +481,19 @@ export default function CanvasViewport({ remeshRef, deleteMeshRef }) {
     // If organizing, compute group defs + per-layer draw_order / parent
     let groupDefs = [];
     let assignments = null;
+    const setExpandedGroups = useEditorStore.getState().setExpandedGroups;
+    const setActiveLayerTab = useEditorStore.getState().setActiveLayerTab;
+
     if (organize) {
       const result = organizeCharacterLayers(layers, uid);
       groupDefs = result.groupDefs;
       assignments = result.assignments;
+
+      // Auto-expand all new groups and switch to Groups tab
+      if (groupDefs.length > 0) {
+        setExpandedGroups(groupDefs.map(g => g.id));
+        setActiveLayerTab('groups');
+      }
     }
 
     updateProject((proj, ver) => {

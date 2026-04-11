@@ -1,4 +1,5 @@
 import React, { useRef, useCallback } from 'react';
+import { useEditorStore } from '@/store/editorStore';
 import {
   ResizableHandle,
   ResizablePanel,
@@ -8,6 +9,7 @@ import CanvasViewport from '@/components/canvas/CanvasViewport';
 import { LayerPanel } from '@/components/layers/LayerPanel';
 import { Inspector } from '@/components/inspector/Inspector';
 import { TimelinePanel } from '@/components/timeline/TimelinePanel';
+import { AnimationListPanel } from '@/components/animation/AnimationListPanel';
 
 export default function EditorLayout() {
   /**
@@ -25,6 +27,9 @@ export default function EditorLayout() {
   const handleDeleteMesh = useCallback((partId) => {
     deleteMeshRef.current?.(partId);
   }, []);
+  
+  const mode = useEditorStore(s => s.editorMode);
+  const isAnimationMode = mode === 'animation';
 
   return (
     <div className="flex h-screen w-full flex-col bg-background text-foreground overflow-hidden">
@@ -55,29 +60,48 @@ export default function EditorLayout() {
           {/* Center: Canvas + Timeline */}
           <ResizablePanel defaultSize={62}>
             <ResizablePanelGroup direction="vertical">
-              <ResizablePanel defaultSize={85}>
+              <ResizablePanel defaultSize={isAnimationMode ? 85 : 100}>
                 <CanvasViewport remeshRef={remeshRef} deleteMeshRef={deleteMeshRef} />
               </ResizablePanel>
-              <ResizableHandle />
-              <ResizablePanel defaultSize={20} minSize={12} collapsible>
-                <div className="flex h-full flex-col border-t">
-                  <TimelinePanel />
-                </div>
-              </ResizablePanel>
+              {isAnimationMode && (
+                <>
+                  <ResizableHandle />
+                  <ResizablePanel defaultSize={15} minSize={12} collapsible>
+                    <div className="flex h-full flex-col border-t">
+                      <TimelinePanel />
+                    </div>
+                  </ResizablePanel>
+                </>
+              )}
             </ResizablePanelGroup>
           </ResizablePanel>
           <ResizableHandle />
 
-          {/* Inspector */}
+          {/* Sidebar: Inspector + Animations */}
           <ResizablePanel defaultSize={20} minSize={14} maxSize={30}>
-            <div className="flex h-full flex-col border-l">
-              <div className="px-3 py-2 border-b shrink-0">
-                <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Inspector</h2>
-              </div>
-              <div className="flex-1 overflow-hidden">
-                <Inspector onRemesh={handleRemesh} onDeleteMesh={handleDeleteMesh} />
-              </div>
-            </div>
+            <ResizablePanelGroup direction="vertical">
+              {/* Inspector Content */}
+              <ResizablePanel defaultSize={isAnimationMode ? 75 : 100} minSize={30}>
+                <div className="flex h-full flex-col border-l">
+                  <div className="px-3 py-2 border-b shrink-0 flex items-center justify-between">
+                    <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Inspector</h2>
+                  </div>
+                  <div className="flex-1 overflow-hidden">
+                    <Inspector onRemesh={handleRemesh} onDeleteMesh={handleDeleteMesh} />
+                  </div>
+                </div>
+              </ResizablePanel>
+              
+              {isAnimationMode && (
+                <>
+                  <ResizableHandle />
+                  {/* Animations Content */}
+                  <ResizablePanel defaultSize={25} minSize={10}>
+                    <AnimationListPanel />
+                  </ResizablePanel>
+                </>
+              )}
+            </ResizablePanelGroup>
           </ResizablePanel>
         </ResizablePanelGroup>
       </div>
