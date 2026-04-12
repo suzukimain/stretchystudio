@@ -30,8 +30,8 @@ export const useEditorStore = create((set) => ({
 
   /** Default mesh generation parameters (used when no per-part override) */
   meshDefaults: {
-    alphaThreshold: 20,
-    smoothPasses:   3,
+    alphaThreshold: 5,
+    smoothPasses:   0,
     gridSpacing:    30,
     edgePadding:    8,
     numEdgePoints:  80,

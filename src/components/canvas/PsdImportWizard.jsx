@@ -6,6 +6,7 @@ import {
   KNOWN_TAGS,
 } from '../../io/armatureOrganizer';
 import { splitLayerLR } from '../../io/splitLR';
+import { HelpIcon } from '../ui/help-icon';
 
 export default function PsdImportWizard({
   step,
@@ -391,19 +392,25 @@ export default function PsdImportWizard({
             <button
               disabled={rigLoading}
               onClick={handleRigManually}
-              className="w-full p-3 text-sm rounded border border-border text-foreground hover:bg-muted transition-colors disabled:opacity-40"
+              className="w-full p-4 text-sm rounded border border-border text-foreground hover:bg-muted transition-colors disabled:opacity-40 text-left group relative"
             >
-              <div className="font-medium">Rig manually</div>
-              <div className="text-xs text-muted-foreground">Fast heuristic from layer positions</div>
+              <div className="flex items-center gap-1.5 font-medium">
+                <span>Rig manually</span>
+                <HelpIcon tip="Instant skeleton estimation using only layer bounding boxes. Best foreground-only characters where arms/legs are clearly separated from the body." />
+              </div>
+              <div className="text-xs text-muted-foreground mt-0.5">Fast heuristic from layer positions</div>
             </button>
 
             <button
               disabled={rigLoading}
               onClick={() => onSetStep('dwpose')}
-              className="w-full p-3 text-sm rounded border border-border text-foreground hover:bg-muted transition-colors disabled:opacity-40"
+              className="w-full p-4 text-sm rounded border border-border text-foreground hover:bg-muted transition-colors disabled:opacity-40 text-left group relative"
             >
-              <div className="font-medium">Rig with DWPose</div>
-              <div className="text-xs text-muted-foreground">High-accuracy AI pose detection</div>
+              <div className="flex items-center gap-1.5 font-medium">
+                <span>Rig with DWPose</span>
+                <HelpIcon tip="High-accuracy whole-body pose detection using an ONNX model. Best for 'see-through' characters where joints are occlusion-heavy." />
+              </div>
+              <div className="text-xs text-muted-foreground mt-0.5">High-accuracy AI pose detection</div>
             </button>
 
             <button

@@ -11,6 +11,7 @@ import {
 } from '@/io/armatureOrganizer';
 import SkeletonOverlay from '@/components/canvas/SkeletonOverlay';
 import PsdImportWizard from '@/components/canvas/PsdImportWizard';
+import { HelpIcon } from '@/components/ui/help-icon';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -1323,13 +1324,14 @@ export default function CanvasViewport({ remeshRef, deleteMeshRef }) {
         <button
           onClick={() => setEditorMode('staging')}
           className={[
-            'px-2.5 py-1 transition-colors',
+            'px-2.5 py-1 transition-colors flex items-center gap-1.5',
             editorState.editorMode !== 'animation'
               ? 'bg-primary text-primary-foreground'
               : 'bg-card text-muted-foreground hover:text-foreground hover:bg-muted',
           ].join(' ')}
         >
-          Staging
+          <span>Staging</span>
+          <HelpIcon tip="In Staging mode, you set the base layout, mesh structure, and joint positions of your character." className={editorState.editorMode !== 'animation' ? 'text-primary-foreground/60 hover:text-primary-foreground/80' : ''} />
         </button>
         <button
           onClick={() => {
@@ -1338,13 +1340,14 @@ export default function CanvasViewport({ remeshRef, deleteMeshRef }) {
             animRef.current.captureRestPose(projectRef.current.nodes);
           }}
           className={[
-            'px-2.5 py-1 transition-colors border-l border-border',
+            'px-2.5 py-1 transition-colors border-l border-border flex items-center gap-1.5',
             editorState.editorMode === 'animation'
               ? 'bg-primary text-primary-foreground'
               : 'bg-card text-muted-foreground hover:text-foreground hover:bg-muted',
           ].join(' ')}
         >
-          Animation
+          <span>Animation</span>
+          <HelpIcon tip="In Animation mode, you create keyframes on the timeline to bring your character to life." className={editorState.editorMode === 'animation' ? 'text-primary-foreground/60 hover:text-primary-foreground/80' : ''} />
         </button>
       </div>
 

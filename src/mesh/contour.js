@@ -187,7 +187,7 @@ export function resampleContour(contour, numPoints) {
  * @param {number}                 numPasses
  * @returns {Array<[number,number]>}
  */
-export function smoothContour(points, numPasses = 3) {
+export function smoothContour(points, numPasses = 0) {
   let result = points.slice();
   for (let p = 0; p < numPasses; p++) {
     result = result.map((pt, i) => {

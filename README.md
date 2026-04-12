@@ -14,7 +14,7 @@ Unlike traditional bone-based systems, Stretchy Studio focuses on a **timeline-f
 ### 📂 Intelligent Import
 - **PSD Layer Extraction**: Full support for multi-layer PSD files with layer names, order, and opacity preserved.
 - **Character Format Detection**: Intelligent recognition of 23+ character part tags (e.g., *eyebrow_L*, *topwear*, *footwear*). Automatically organizes layers into a structured **Head** (with **Eyes** subgroup), **Body** (with **Upper/Lowerbody**), and **Extras** hierarchy while preserving the original PSD draw order.
-- **Mesh-on-Demand**: Start with lightweight textures; opt-in to low-poly mesh generation for advanced deformation when needed.
+- **Mesh-on-Demand**: Start with lightweight textures; opt-in to low-poly mesh generation for advanced deformation when needed (Defaults: Alpha Threshold 5, Smooth Passes 0).
 
 ### 📐 Precision Rigging
 - **Hierarchical Transforms**: Nested group structures with parent-child transform inheritance.
@@ -31,6 +31,7 @@ Unlike traditional bone-based systems, Stretchy Studio focuses on a **timeline-f
 - **Pivot Calibration**: Accurate pivot placement for natural rotations and scaling.
 - **Selection Isolation**: Selection and Gizmos automatically lock/hide when skeleton is active to prevent accidental layer changes during rigging.
 - **Alpha-Based Selection**: Pixel-perfect selection that works instantly on both textured quads and complex meshes.
+- **Inline Help System**: Reusable `HelpIcon` components provide instant tooltips for complex parameters across the UI (Inspector, Timeline, Rigging Wizard, and Mode Toggles).
 
 ### 🎬 Professional Timeline
 - **AE-Style Workflow**: Familiar keyframing system for transforms (X, Y, Rotation, Scale) and Mesh Vertices.

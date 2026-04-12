@@ -3,6 +3,7 @@ import { useEditorStore } from '@/store/editorStore';
 import { useProjectStore } from '@/store/projectStore';
 import { Eye, EyeOff, Edit3, Check, Scissors } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
+import { HelpIcon } from '@/components/ui/help-icon';
 
 /**
  * Armature panel — toggles skeleton visibility and joint editing.
@@ -70,7 +71,10 @@ export function ArmaturePanel() {
         <label className="flex items-center justify-between px-3 py-2 text-xs rounded-md border border-border/50 bg-muted/10 hover:bg-muted/30 transition-all cursor-pointer group">
           <div className="flex items-center gap-2 text-muted-foreground group-hover:text-foreground transition-colors">
             <Scissors size={14} className="opacity-70 group-hover:opacity-100" />
-            <span className="font-medium">Iris Clipping</span>
+            <div className="flex items-center gap-1.5">
+              <span className="font-medium">Iris Clipping</span>
+              <HelpIcon tip="Constrains irises to be rendered only within the bounds of the eyewhite layers." />
+            </div>
           </div>
           <Checkbox 
             checked={editorState.overlays.irisClipping} 

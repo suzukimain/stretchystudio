@@ -8,11 +8,11 @@
  * @param {Uint8ClampedArray} data
  * @param {number}            width
  * @param {number}            height
- * @param {number}            [alphaThreshold=20]
+ * @param {number}            [alphaThreshold=5]
  * @param {number}            [gridSpacing=30]
  * @returns {Array<[number,number]>}
  */
-export function sampleInterior(data, width, height, alphaThreshold = 20, gridSpacing = 30) {
+export function sampleInterior(data, width, height, alphaThreshold = 5, gridSpacing = 30) {
   const points = [];
   const jitter = gridSpacing * 0.4;
 

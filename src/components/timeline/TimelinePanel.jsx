@@ -2,6 +2,7 @@ import React, { useRef, useCallback, useEffect, useState, useMemo } from 'react'
 import { useAnimationStore } from '@/store/animationStore';
 import { useProjectStore } from '@/store/projectStore';
 import { useEditorStore } from '@/store/editorStore';
+import { HelpIcon } from '@/components/ui/help-icon';
 
 /* ──────────────────────────────────────────────────────────────────────────
    Constants
@@ -50,7 +51,7 @@ function TransportBtn({ onClick, active, title, children }) {
 /* ──────────────────────────────────────────────────────────────────────────
    Tiny numeric field (for frame/fps/speed inputs)
 ────────────────────────────────────────────────────────────────────────── */
-function NumField({ label, value, onChange, min, max, step = 1, className = '' }) {
+function NumField({ label, value, onChange, min, max, step = 1, className = '', tip }) {
   const [local, setLocal] = useState(String(value));
 
   useEffect(() => { setLocal(String(value)); }, [value]);
@@ -63,7 +64,10 @@ function NumField({ label, value, onChange, min, max, step = 1, className = '' }
 
   return (
     <label className={`flex items-center gap-1 ${className}`}>
-      <span className="text-[10px] text-muted-foreground whitespace-nowrap select-none">{label}</span>
+      <div className="flex items-center gap-1">
+        <span className="text-[10px] text-muted-foreground whitespace-nowrap select-none">{label}</span>
+        {tip && <HelpIcon tip={tip} className="opacity-70 hover:opacity-100" />}
+      </div>
       <input
         type="number"
         value={local}
@@ -563,7 +567,10 @@ export function TimelinePanel() {
             onChange={(e) => anim.setLoopKeyframes && anim.setLoopKeyframes(e.target.checked)}
             className="w-3 h-3 accent-primary"
           />
-          <span className="text-[10px] text-muted-foreground whitespace-nowrap">Loop Keyframe</span>
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] text-muted-foreground whitespace-nowrap">Loop Keyframe</span>
+            <HelpIcon tip="When active, the animation will interpolate from the last keyframe back to the first keyframe for a seamless loop." />
+          </div>
         </label>
 
         <div className="w-px h-4 bg-border mx-1" />
@@ -575,6 +582,7 @@ export function TimelinePanel() {
           min={startFrame}
           max={endFrame}
           onChange={(v) => anim.seekFrame(v)}
+          tip="The current playback frame."
         />
         <NumField
           label="Start"
@@ -582,12 +590,14 @@ export function TimelinePanel() {
           min={0}
           max={endFrame - 1}
           onChange={(v) => anim.setStartFrame(v)}
+          tip="The first frame of the animation loop."
         />
         <NumField
           label="End"
           value={endFrame}
           min={startFrame + 1}
           onChange={(v) => anim.setEndFrame(v)}
+          tip="The last frame of the animation loop."
         />
 
         <div className="w-px h-4 bg-border mx-1" />
@@ -598,11 +608,15 @@ export function TimelinePanel() {
           min={1}
           max={120}
           onChange={(v) => anim.setFps(v)}
+          tip="Frames per second — determines playback granularity."
         />
 
         {/* Speed slider */}
         <label className="flex items-center gap-1 ml-1">
-          <span className="text-[10px] text-muted-foreground whitespace-nowrap">Speed</span>
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] text-muted-foreground whitespace-nowrap">Speed</span>
+            <HelpIcon tip="Playback speed multiplier." />
+          </div>
           <input
             type="range"
             min={0}

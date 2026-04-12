@@ -50,8 +50,8 @@ export function retriangulate(vertices, uvs, edgeIndices) {
  * @param {number}            width
  * @param {number}            height
  * @param {Object}            [opts]
- * @param {number}            [opts.alphaThreshold=20]
- * @param {number}            [opts.smoothPasses=3]
+ * @param {number}            [opts.alphaThreshold=5]
+ * @param {number}            [opts.smoothPasses=0]
  * @param {number}            [opts.gridSpacing=30]
  * @param {number}            [opts.edgePadding=8]    - Min distance interior pts must keep from edge pts
  * @param {number}            [opts.numEdgePoints=80] - Total edge pts distributed across all contours
@@ -59,8 +59,8 @@ export function retriangulate(vertices, uvs, edgeIndices) {
  */
 export function generateMesh(data, width, height, opts = {}) {
   const {
-    alphaThreshold = 20,
-    smoothPasses   = 3,
+    alphaThreshold = 5,
+    smoothPasses   = 0,
     gridSpacing    = 30,
     edgePadding    = 8,
     numEdgePoints  = 80,
