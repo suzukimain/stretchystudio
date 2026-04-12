@@ -7,12 +7,10 @@ import { computePoseOverrides, KEYFRAME_PROPS, getNodePropertyValue, upsertKeyfr
 import { ScenePass } from '@/renderer/scenePass';
 import { importPsd } from '@/io/psd';
 import {
-  detectCharacterFormat, matchTag,
-  analyzeGroups, buildArmatureNodes,
-  loadDWPoseSession, runDWPose, clearDWPoseSession,
-  DWPOSE_URL,
+  detectCharacterFormat,
 } from '@/io/armatureOrganizer';
 import SkeletonOverlay from '@/components/canvas/SkeletonOverlay';
+import PsdImportWizard from '@/components/canvas/PsdImportWizard';
 import { computeWorldMatrices, mat3Inverse, mat3Identity } from '@/renderer/transforms';
 import { retriangulate } from '@/mesh/generate';
 import { GizmoOverlay } from '@/components/canvas/GizmoOverlay';
@@ -113,15 +111,14 @@ export default function CanvasViewport({ remeshRef, deleteMeshRef }) {
   const dragRef          = useRef(null);   // { partId, vertexIndex, startWorldX, startWorldY, startLocalX, startLocalY }
   const panRef           = useRef(null);   // { startX, startY, panX0, panY0 }
   const isDirtyRef       = useRef(true);
-  const pendingPsdRef    = useRef(null);   // { psdW, psdH, layers, partIds } while org modal is open
   const brushCircleRef      = useRef(null);   // SVG <circle> for brush cursor — mutated directly for perf
   const meshOverriddenParts = useRef(new Set()); // parts whose GPU mesh was overridden last frame
 
-  // Armature rig modal state
-  const [rigModal, setRigModal]             = useState(false);
-  const [rigStatus, setRigStatus]           = useState('');  // user-visible progress
-  const [rigLoading, setRigLoading]         = useState(false);
-  const onnxSessionRef                      = useRef(null);  // cached across imports
+  // PSD import wizard state
+  const [wizardStep, setWizardStep]         = useState(null);  // null | 'choose' | 'dwpose' | 'adjust'
+  const [wizardPsd, setWizardPsd]           = useState(null);  // { psdW, psdH, layers, partIds }
+  const preImportSnapshotRef                = useRef(null);  // project snapshot before finalizePsdImport
+  const onnxSessionRef                      = useRef(null);  // cached ONNX session across imports
 
   const project        = useProjectStore(s => s.project);
   const updateProject  = useProjectStore(s => s.updateProject);
@@ -647,40 +644,43 @@ export default function CanvasViewport({ remeshRef, deleteMeshRef }) {
     });
   }, [updateProject]);
 
-  /* ── Armature import: run DWPose then build rig ────────────────────────── */
-  const runArmatureRig = useCallback(async (onnxPayload) => {
-    const { psdW, psdH, layers, partIds } = pendingPsdRef.current;
-    setRigLoading(true);
-    try {
-      setRigStatus('Loading ONNX model…');
-      const session = await loadDWPoseSession(onnxPayload);
-      onnxSessionRef.current = session;
+  /* ── Wizard: finalize with rig (called by PsdImportWizard) ──────────────── */
+  const handleWizardFinalize = useCallback((groupDefs, assignments) => {
+    const { psdW, psdH, layers, partIds } = wizardPsd;
+    // Snapshot project state before modifying (supports Back from adjust step)
+    preImportSnapshotRef.current = JSON.stringify(useProjectStore.getState().project);
+    finalizePsdImport(psdW, psdH, layers, partIds, groupDefs, assignments);
+    useEditorStore.getState().setShowSkeleton(true);
+    useEditorStore.getState().setSkeletonEditMode(true);
+    setWizardStep('adjust');
+  }, [wizardPsd, finalizePsdImport]);
 
-      const layerMap = {};
-      layers.forEach(l => {
-        const key = l.name.toLowerCase().trim();
-        layerMap[key] = l;
-      });
-      const groups = analyzeGroups(layerMap);
+  /* ── Wizard: skip rigging (called by PsdImportWizard) ──────────────────── */
+  const handleWizardSkip = useCallback(() => {
+    const { psdW, psdH, layers, partIds } = wizardPsd;
+    finalizePsdImport(psdW, psdH, layers, partIds, [], null);
+    setWizardPsd(null);
+    setWizardStep(null);
+  }, [wizardPsd, finalizePsdImport]);
 
-      const skeleton = await runDWPose(layers, psdW, psdH, session, setRigStatus);
+  /* ── Wizard: complete (called by PsdImportWizard adjust step) ──────────── */
+  const handleWizardComplete = useCallback(() => {
+    setWizardStep(null);
+    setWizardPsd(null);
+    useEditorStore.getState().setSkeletonEditMode(false);
+    preImportSnapshotRef.current = null;
+  }, []);
 
-      setRigStatus('Building rig…');
-      const { groupDefs, assignments } = buildArmatureNodes(skeleton, groups, layers, partIds, uid);
-
-      setRigModal(false);
-      pendingPsdRef.current = null;
-      finalizePsdImport(psdW, psdH, layers, partIds, groupDefs, assignments);
-      // Show skeleton overlay after rig
-      useEditorStore.getState().setShowSkeleton(true);
-    } catch (err) {
-      console.error('[AutoRig]', err);
-      setRigStatus(`Error: ${err.message}`);
-      clearDWPoseSession();
-    } finally {
-      setRigLoading(false);
+  /* ── Wizard: back from adjust (revert to snapshot, reopen wizard) ──────── */
+  const handleWizardBack = useCallback(() => {
+    if (preImportSnapshotRef.current) {
+      useProjectStore.setState({ project: JSON.parse(preImportSnapshotRef.current) });
+      preImportSnapshotRef.current = null;
     }
-  }, [finalizePsdImport]);
+    useEditorStore.getState().setSkeletonEditMode(false);
+    useEditorStore.getState().setShowSkeleton(false);
+    setWizardStep('choose');
+  }, []);
 
   /* ── PSD import helper ───────────────────────────────────────────────── */
   const importPsdFile = useCallback((file) => {
@@ -695,10 +695,9 @@ export default function CanvasViewport({ remeshRef, deleteMeshRef }) {
       const partIds = layers.map(() => uid());
 
       if (detectCharacterFormat(layers)) {
-        // See-through character detected → offer armature rig
-        pendingPsdRef.current = { psdW, psdH, layers, partIds };
-        setRigStatus('');
-        setRigModal(true);
+        // See-through character detected → open import wizard
+        setWizardPsd({ psdW, psdH, layers, partIds });
+        setWizardStep('choose');
       } else {
         finalizePsdImport(psdW, psdH, layers, partIds, [], null);
       }
@@ -1228,85 +1227,19 @@ export default function CanvasViewport({ remeshRef, deleteMeshRef }) {
       )}
 
 
-      {/* Auto-rig modal — shown for see-through PSDs */}
-      {rigModal && pendingPsdRef.current && (() => {
-        const { layers } = pendingPsdRef.current;
-        const matchCount = layers.filter(l => matchTag(l.name) !== null).length;
-        const dismissFlat = () => {
-          setRigModal(false);
-          const { psdW, psdH, layers: ls, partIds } = pendingPsdRef.current;
-          pendingPsdRef.current = null;
-          finalizePsdImport(psdW, psdH, ls, partIds, [], null);
-        };
-        return (
-          <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70">
-            <div className="bg-popover border border-border rounded-lg shadow-2xl p-6 max-w-sm w-full mx-4 flex flex-col gap-4">
-              <div>
-                <h3 className="text-sm font-semibold text-foreground mb-1">Auto-rig character?</h3>
-                <p className="text-xs text-muted-foreground leading-relaxed">
-                  {matchCount} of {layers.length} layers match see-through part names.
-                  DWPose will detect joint positions and create a bone hierarchy
-                  ready for animation.
-                </p>
-              </div>
-
-              {/* ONNX source buttons */}
-              <div className="flex flex-col gap-2">
-                <div className="text-[10px] text-muted-foreground uppercase tracking-wide">Load DWPose model</div>
-                <div className="flex gap-2">
-                  {/* Local .onnx file */}
-                  <label className={[
-                    'flex-1 text-center px-3 py-1.5 text-xs rounded border cursor-pointer transition-colors',
-                    rigLoading
-                      ? 'opacity-40 pointer-events-none border-border text-muted-foreground'
-                      : 'border-border text-muted-foreground hover:text-foreground hover:bg-muted',
-                  ].join(' ')}>
-                    Load .onnx file
-                    <input
-                      type="file" accept=".onnx" className="hidden"
-                      onChange={async (e) => {
-                        const f = e.target.files?.[0];
-                        if (!f) return;
-                        runArmatureRig(await f.arrayBuffer());
-                      }}
-                    />
-                  </label>
-
-                  {/* Download from HuggingFace */}
-                  <button
-                    disabled={rigLoading}
-                    className="flex-1 px-3 py-1.5 text-xs rounded bg-primary text-primary-foreground hover:bg-primary/90 transition-colors font-medium disabled:opacity-40"
-                    onClick={() => runArmatureRig(DWPOSE_URL)}
-                  >
-                    {rigLoading ? 'Working…' : 'Download (~50 MB)'}
-                  </button>
-                </div>
-
-                {/* Status */}
-                {rigStatus && (
-                  <p className={[
-                    'text-[11px] px-1',
-                    rigStatus.startsWith('Error') ? 'text-red-400' : 'text-muted-foreground',
-                  ].join(' ')}>
-                    {rigStatus}
-                  </p>
-                )}
-              </div>
-
-              {/* Footer */}
-              <div className="flex justify-end border-t border-border pt-3">
-                <button
-                  disabled={rigLoading}
-                  className="px-3 py-1.5 text-xs rounded border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40"
-                  onClick={dismissFlat}
-                >
-                  Import without rigging
-                </button>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
+      {/* PSD import wizard — step-by-step rigging setup */}
+      {wizardStep && wizardPsd && (
+        <PsdImportWizard
+          step={wizardStep}
+          onSetStep={setWizardStep}
+          pendingPsd={wizardPsd}
+          onnxSessionRef={onnxSessionRef}
+          onFinalize={handleWizardFinalize}
+          onSkip={handleWizardSkip}
+          onComplete={handleWizardComplete}
+          onBack={handleWizardBack}
+        />
+      )}
     </div>
   );
 }

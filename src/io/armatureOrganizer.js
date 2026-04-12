@@ -3,12 +3,10 @@
  *
  * Converts a see-through PSD into a joint-based armature by:
  *   1. Running DWPose ONNX inference on the composited character to get keypoints
- *   2. Mapping the 17 COCO body keypoints to named joints (neck, shoulders, hips, …)
+ *      — OR — estimating skeleton positions from layer bounding boxes (heuristic)
+ *   2. Mapping keypoints to named joints (neck, shoulders, hips, …)
  *   3. Building a bone hierarchy of group nodes with pivot points set from those joints
  *   4. Routing each semantic layer to its parent bone group
- *
- * Bounding-box skeleton estimation is intentionally not implemented.
- * DWPose is the only skeleton source.
  */
 
 import * as ort from 'onnxruntime-web';
@@ -98,6 +96,112 @@ export function analyzeGroups(layerMap) {
     legs:  splitState('legwear'),
     feet:  splitState('footwear'),
   };
+}
+
+/* ─── Bounding-box heuristic skeleton ──────────────────────────────────────── */
+
+/**
+ * Estimate skeleton keypoints from the spatial footprints of named layers.
+ * Instantaneous; no model required. Accuracy depends on layer naming.
+ *
+ * @param {Array}  layers  Flat layer array from importPsd (each has x, y, width, height)
+ * @param {number} psdW
+ * @param {number} psdH
+ * @returns {Object} Named keypoints dict compatible with buildArmatureNodes
+ */
+export function estimateSkeletonFromBounds(layers, psdW, psdH) {
+  // Build tag → bbox map (first occurrence wins per tag)
+  const tagBboxes = {};
+  layers.forEach(layer => {
+    const tag = matchTag(layer.name);
+    if (!tag || !layer.width || !layer.height) return;
+    if (tagBboxes[tag]) return;
+    const x = layer.x ?? 0, y = layer.y ?? 0;
+    tagBboxes[tag] = { x, y, w: layer.width, h: layer.height,
+                       cx: x + layer.width / 2, cy: y + layer.height / 2 };
+  });
+
+  const getBbox = tag => tagBboxes[tag] ?? null;
+  const firstOf = tags => { for (const t of tags) { const b = getBbox(t); if (b) return b; } return null; };
+
+  const kp = {};
+
+  // Head / Face
+  const face = getBbox('face') ?? firstOf(['front hair', 'headwear']);
+  if (face) {
+    kp.nose   = { x: face.cx,                   y: face.cy + face.h * 0.08 };
+    kp.lEye   = { x: face.cx - face.w * 0.18,   y: face.cy - face.h * 0.05 };
+    kp.rEye   = { x: face.cx + face.w * 0.18,   y: face.cy - face.h * 0.05 };
+    kp.midEye = { x: face.cx,                   y: face.cy - face.h * 0.05 };
+    kp.lEar   = { x: face.cx - face.w * 0.45,   y: face.cy };
+    kp.rEar   = { x: face.cx + face.w * 0.45,   y: face.cy };
+  }
+
+  // Torso / Shoulders
+  const topwear = getBbox('topwear');
+  if (topwear) {
+    kp.neck        = { x: topwear.cx,                       y: topwear.y };
+    kp.lShoulder   = { x: topwear.x + topwear.w * 0.15,    y: topwear.y + topwear.h * 0.12 };
+    kp.rShoulder   = { x: topwear.x + topwear.w * 0.85,    y: topwear.y + topwear.h * 0.12 };
+    kp.shoulderMid = { x: topwear.cx,                       y: topwear.y + topwear.h * 0.12 };
+    kp.spine       = { x: topwear.cx,                       y: topwear.cy };
+    kp.waist       = { x: topwear.cx,                       y: topwear.y + topwear.h * 0.85 };
+  }
+
+  // Arms — wrist from handwear bounds, elbow interpolated halfway
+  const handL = getBbox('handwear-l') ?? getBbox('handwear');
+  const handR = getBbox('handwear-r') ?? getBbox('handwear');
+  if (kp.lShoulder && handL) {
+    kp.lWrist = { x: handL.cx, y: handL.y + handL.h * 0.1 };
+    kp.lElbow = { x: (kp.lShoulder.x + kp.lWrist.x) / 2, y: (kp.lShoulder.y + kp.lWrist.y) / 2 };
+  }
+  if (kp.rShoulder && handR) {
+    kp.rWrist = { x: handR.cx, y: handR.y + handR.h * 0.1 };
+    kp.rElbow = { x: (kp.rShoulder.x + kp.rWrist.x) / 2, y: (kp.rShoulder.y + kp.rWrist.y) / 2 };
+  }
+
+  // Hips / Pelvis
+  const bottomwear = getBbox('bottomwear');
+  if (bottomwear) {
+    kp.pelvis = { x: bottomwear.cx,                        y: bottomwear.cy };
+    kp.lHip   = { x: bottomwear.cx - bottomwear.w * 0.2,  y: bottomwear.y + bottomwear.h * 0.15 };
+    kp.rHip   = { x: bottomwear.cx + bottomwear.w * 0.2,  y: bottomwear.y + bottomwear.h * 0.15 };
+  } else if (kp.waist) {
+    kp.pelvis = { x: kp.waist.x,           y: kp.waist.y + psdH * 0.08 };
+    kp.lHip   = { x: kp.pelvis.x - psdW * 0.1, y: kp.pelvis.y };
+    kp.rHip   = { x: kp.pelvis.x + psdW * 0.1, y: kp.pelvis.y };
+  }
+
+  // Legs — knee interpolated, ankle from footwear or bottom of legwear
+  const legL  = getBbox('legwear-l') ?? getBbox('legwear');
+  const legR  = getBbox('legwear-r') ?? getBbox('legwear');
+  const footL = getBbox('footwear-l') ?? getBbox('footwear');
+  const footR = getBbox('footwear-r') ?? getBbox('footwear');
+  if (kp.lHip && legL) {
+    const ankle = footL ? { x: footL.cx, y: footL.cy } : { x: legL.cx, y: legL.y + legL.h };
+    kp.lAnkle = ankle;
+    kp.lKnee  = { x: (kp.lHip.x + ankle.x) / 2, y: (kp.lHip.y + ankle.y) / 2 };
+  }
+  if (kp.rHip && legR) {
+    const ankle = footR ? { x: footR.cx, y: footR.cy } : { x: legR.cx, y: legR.y + legR.h };
+    kp.rAnkle = ankle;
+    kp.rKnee  = { x: (kp.rHip.x + ankle.x) / 2, y: (kp.rHip.y + ankle.y) / 2 };
+  }
+
+  // Mandatory fallbacks for keypoints buildArmatureNodes always reads
+  const cx = psdW / 2, cy = psdH / 2;
+  if (!kp.pelvis)      kp.pelvis      = { x: cx,              y: cy };
+  if (!kp.neck)        kp.neck        = { x: cx,              y: psdH * 0.25 };
+  if (!kp.lShoulder)   kp.lShoulder   = { x: cx - psdW * 0.15, y: psdH * 0.30 };
+  if (!kp.rShoulder)   kp.rShoulder   = { x: cx + psdW * 0.15, y: psdH * 0.30 };
+  if (!kp.shoulderMid) kp.shoulderMid = { x: cx,              y: psdH * 0.30 };
+  if (!kp.waist)       kp.waist       = { x: cx,              y: psdH * 0.55 };
+  if (!kp.spine)       kp.spine       = { x: cx,              y: psdH * 0.42 };
+  if (!kp.lHip)        kp.lHip        = { x: cx - psdW * 0.1, y: psdH * 0.58 };
+  if (!kp.rHip)        kp.rHip        = { x: cx + psdW * 0.1, y: psdH * 0.58 };
+  if (!kp.midEye)      kp.midEye      = { x: cx,              y: psdH * 0.18 };
+
+  return kp;
 }
 
 /* ─── DWPose ONNX inference ─────────────────────────────────────────────────── */
