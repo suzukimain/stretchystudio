@@ -29,7 +29,7 @@ Unlike traditional bone-based systems, Stretchy Studio focuses on a **timeline-f
 - **Limb Bending (Elbows/Knees)**: Realistic 2D vertex skinning for arms and legs. Automatically computes bone weights by projecting vertices onto bone axes. Works seamlessly with direct rotation handles.
 - **Automatic Iris Clipping**: Advanced stencil-based masking keeps irides contained within eyewhites. Intelligent L/R matching handles split-eye characters out-of-the-box via name-suffix detection.
 - **Pivot Calibration**: Accurate pivot placement for natural rotations and scaling.
-- **Selection Isolation**: Selection and Gizmos automatically lock/hide when skeleton is active to prevent accidental layer changes during rigging.
+- **Selection Isolation**: Selection and Gizmos automatically lock/hide when skeleton is active AND a rig exists to focus on bone joint setup. Standard selection remains enabled for un-rigged projects.
 - **Alpha-Based Selection**: Pixel-perfect selection that works instantly on both textured quads and complex meshes.
 - **Inline Help System**: Reusable `HelpIcon` components provide instant tooltips for complex parameters across the UI (Inspector, Timeline, Rigging Wizard, and Mode Toggles).
 

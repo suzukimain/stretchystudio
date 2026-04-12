@@ -849,7 +849,10 @@ export default function CanvasViewport({ remeshRef, deleteMeshRef, saveRef, load
 
     // When skeleton is visible, we disable standard layer selection/dragging
     // to focus exclusively on bone interactions.
-    if (editorRef.current.showSkeleton) return;
+    // BUGFIX: If showSkeleton is true but NO armature exists (e.g. at start or skip rigging),
+    // we MUST allow standard selection, otherwise the user is stuck.
+    const hasArmature = proj.nodes.some(n => n.type === 'group' && n.boneRole);
+    if (editorRef.current.showSkeleton && hasArmature) return;
 
     const [worldX, worldY] = clientToCanvasSpace(canvas, e.clientX, e.clientY, view);
     const proj = projectRef.current;
@@ -1314,8 +1317,8 @@ export default function CanvasViewport({ remeshRef, deleteMeshRef, saveRef, load
         />
       </svg>
 
-      {/* Transform gizmo SVG overlay — hidden when skeleton is showing */}
-      {!editorState.showSkeleton && <GizmoOverlay />}
+      {/* Transform gizmo SVG overlay — hidden when skeleton is showing AND exists */}
+      {(!editorState.showSkeleton || !project.nodes.some(n => n.type === 'group' && n.boneRole)) && <GizmoOverlay />}
 
       {/* Armature skeleton overlay (staging mode, when rig exists) */}
       <SkeletonOverlay
