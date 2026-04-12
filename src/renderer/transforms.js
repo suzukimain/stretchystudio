@@ -121,3 +121,36 @@ export function computeWorldMatrices(nodes) {
   for (const node of nodes) resolve(node);
   return worldMap;
 }
+
+/**
+ * Compute effective visibility and opacity for every node by walking the
+ * parent chain and accumulating values (depth-first, memoised).
+ *
+ * A node is effectively visible only when it AND all ancestors are visible.
+ * Effective opacity is the product of a node's own opacity with all ancestor
+ * opacities (mirrors how Photoshop / After Effects layer groups behave).
+ *
+ * @param {Array} nodes  Flat node array from projectStore
+ * @returns {{ visMap: Map<string,boolean>, opMap: Map<string,number> }}
+ */
+export function computeEffectiveProps(nodes) {
+  const visMap  = new Map();
+  const opMap   = new Map();
+  const nodeMap = new Map(nodes.map(n => [n.id, n]));
+
+  function resolve(node) {
+    if (visMap.has(node.id)) return;
+    const parentId = node.parent;
+    if (parentId && nodeMap.has(parentId)) {
+      resolve(nodeMap.get(parentId));
+      visMap.set(node.id, visMap.get(parentId) && (node.visible !== false));
+      opMap.set(node.id, opMap.get(parentId) * (node.opacity ?? 1));
+    } else {
+      visMap.set(node.id, node.visible !== false);
+      opMap.set(node.id, node.opacity ?? 1);
+    }
+  }
+
+  for (const node of nodes) resolve(node);
+  return { visMap, opMap };
+}

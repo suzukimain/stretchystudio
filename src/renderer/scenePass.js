@@ -12,7 +12,7 @@ import { createProgram } from './program.js';
 import { MESH_VERT, MESH_FRAG, WIRE_VERT, WIRE_FRAG } from './shaders/mesh.js';
 import { PartRenderer } from './partRenderer.js';
 import { BackgroundRenderer } from './backgroundRenderer.js';
-import { computeWorldMatrices, mat3Mul } from './transforms.js';
+import { computeWorldMatrices, computeEffectiveProps, mat3Mul } from './transforms.js';
 import { matchTag } from '../io/psdOrganizer.js';
 
 /**
@@ -132,8 +132,9 @@ export class ScenePass {
         })
       : project.nodes;
 
-    // ── Hierarchy pass: compute world matrix for every node ───────────────
+    // ── Hierarchy pass: compute world matrix and effective vis/opacity ────
     const worldMatrices = computeWorldMatrices(effectiveNodes);
+    const { visMap, opMap } = computeEffectiveProps(effectiveNodes);
 
     // Sort parts by draw_order ascending (groups are never rendered directly)
     const parts = effectiveNodes
@@ -148,7 +149,7 @@ export class ScenePass {
       const uOpacity = this.meshUniforms('u_opacity');
 
       for (const part of parts) {
-        if (part.visible === false) continue;
+        if (!visMap.get(part.id)) continue;
 
         // ── Stencil Clipping (Iris → Eyewhite) ──
         const sInfo = overlays.irisClipping !== false ? getIrisStencilInfo(part.name) : null;
@@ -172,7 +173,7 @@ export class ScenePass {
         const worldMatrix = worldMatrices.get(part.id);
         const partMvp     = worldMatrix ? mat3Mul(camera, worldMatrix) : camera;
 
-        const baseOpacity = part.opacity ?? 1;
+        const baseOpacity = opMap.get(part.id) ?? 1;
         const effectiveOpacity = meshEditMode && !selectionSet.has(part.id)
           ? baseOpacity * 0.5
           : baseOpacity;
@@ -197,7 +198,7 @@ export class ScenePass {
       const uColor = this.wireUniforms('u_color');
 
       for (const part of parts) {
-        if (part.visible === false) continue;
+        if (!visMap.get(part.id)) continue;
         const isSelected = selectionSet.has(part.id);
 
         const worldMatrix = worldMatrices.get(part.id);
